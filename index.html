@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Seven Thursday</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+    table, th, td { border: 1px solid #ccc; border-collapse: collapse; }
+    th, td { padding: 8px; text-align: center; }
+    table { width: 100%; margin-top: 20px; background: #fff; }
+    input[type="number"] { width: 60px; }
+  </style>
+</head>
+<body>
+  <h1>Seven Thursday</h1>
+
+  <form id="entryForm">
+    <label for="date">Select Date:</label>
+    <input type="date" id="date" required />
+    <table>
+      <thead>
+        <tr><th>Person</th><th>Amount (in AED)</th></tr>
+      </thead>
+      <tbody id="inputRows"></tbody>
+    </table>
+    <button type="submit">Submit / Update Entry</button>
+  </form>
+
+  <h2>Summary Report</h2>
+  <div id="summary"></div>
+
+  <h2>Expected Total</h2>
+  <div id="expectedTotal"></div>
+
+  <h2>Individual Reports</h2>
+  <div id="individualReports"></div>
+
+  <button onclick="exportToExcel()">Export as Excel</button>
+  <button onclick="exportToPDF()">Export as PDF</button>
+
+  <script>
+    const people = ["Anwar", "Ilyas", "Noushad", "Jabir", "Ali", "Muneer", "Mashoodh"];
+    const expectedWeekly = 20;
+    const inputRows = document.getElementById("inputRows");
+    const dateInput = document.getElementById("date");
+    const API_URL = "https://script.google.com/macros/s/AKfycbzIMAh9dP3-XSzYPzVNqt0m6B-NWdUisYPjDfQPUfO2QLm1lIL5b9_9-kDFLSNUbs0xYw/exec";
+
+    let data = {};
+
+    people.forEach(name => {
+      const row = document.createElement("tr");
+      row.innerHTML = `<td>${name}</td><td><input type="number" min="0" value="0" name="${name}" /></td>`;
+      inputRows.appendChild(row);
+    });
+
+    dateInput.addEventListener("change", () => {
+      const selectedDate = dateInput.value;
+      if (selectedDate && data[selectedDate]) {
+        people.forEach(name => {
+          document.querySelector(`[name='${name}']`).value = data[selectedDate][name] || 0;
+        });
+      } else {
+        people.forEach(name => {
+          document.querySelector(`[name='${name}']`).value = 0;
+        });
+      }
+    });
+
+    document.getElementById("entryForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const date = dateInput.value;
+      if (!date) return;
+
+      const entries = {};
+      people.forEach(name => {
+        entries[name] = parseInt(document.querySelector(`[name='${name}']`).value) || 0;
+      });
+
+      const res = await fetch(API_URL, {
+        method: "POST",
+        body: JSON.stringify({ date, entries }),
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (res.ok) {
+        alert("Saved to Google Sheet!");
+        fetchData();
+      } else {
+        alert("Error saving data.");
+      }
+    });
+
+    async function fetchData() {
+      const res = await fetch(API_URL);
+      if (res.ok) {
+        data = await res.json();
+        generateReports();
+      } else {
+        alert("Failed to load data.");
+      }
+    }
+
+    function getThursdays(fromDate, toDate) {
+      const thursdays = [];
+      const date = new Date(fromDate);
+      date.setDate(date.getDate() + (4 - date.getDay() + 7) % 7);
+      while (date <= toDate) {
+        thursdays.push(new Date(date));
+        date.setDate(date.getDate() + 7);
+      }
+      return thursdays;
+    }
+
+    function generateReports() {
+      const summaryDiv = document.getElementById("summary");
+      const individualDiv = document.getElementById("individualReports");
+      const expectedTotalDiv = document.getElementById("expectedTotal");
+      summaryDiv.innerHTML = "";
+      individualDiv.innerHTML = "";
+      expectedTotalDiv.innerHTML = "";
+
+      const weekly = {}, monthly = {}, totals = {};
+
+      Object.keys(data).forEach(date => {
+        const week = new Date(date).toISOString().slice(0, 10);
+        const month = date.slice(0, 7);
+        weekly[week] = (weekly[week] || 0);
+        monthly[month] = (monthly[month] || 0);
+
+        people.forEach(name => {
+          const amt = data[date][name] || 0;
+          weekly[week] += amt;
+          monthly[month] += amt;
+          totals[name] = (totals[name] || 0) + amt;
+        });
+      });
+
+      summaryDiv.innerHTML = `
+        <h3>Weekly Summary</h3>
+        <table><tr><th>Week (Date)</th><th>Total AED</th></tr>
+          ${Object.entries(weekly).map(([w, a]) => `<tr><td>${w}</td><td>${a}</td></tr>`).join("")}
+        </table>
+        <h3>Monthly Summary</h3>
+        <table><tr><th>Month</th><th>Total AED</th></tr>
+          ${Object.entries(monthly).map(([m, a]) => `<tr><td>${m}</td><td>${a}</td></tr>`).join("")}
+        </table>
+        <h3>Overall Total: AED ${Object.values(totals).reduce((a, b) => a + b, 0)}</h3>
+      `;
+
+      const startDate = new Date("2025-02-06");
+      const today = new Date();
+      const lastThursday = new Date(today);
+      lastThursday.setDate(today.getDate() - ((today.getDay() + 3) % 7));
+      const thursdays = getThursdays(startDate, lastThursday);
+      const expected = thursdays.length * expectedWeekly;
+
+      expectedTotalDiv.innerHTML = `<strong>Expected Total of Each Person: AED ${expected}</strong>`;
+
+      let indTable = `<table><tr><th>Name</th><th>Total Deposits (AED)</th><th>Pending (AED)</th></tr>`;
+      people.forEach(name => {
+        const paid = totals[name] || 0;
+        const pending = Math.max(0, expected - paid);
+        indTable += `<tr><td>${name}</td><td>${paid}</td><td>${pending}</td></tr>`;
+      });
+      indTable += `</table>`;
+      individualDiv.innerHTML = indTable;
+    }
+
+    function exportToExcel() {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet([]);
+
+      Object.keys(data).forEach(date => {
+        const row = { Date: date };
+        people.forEach(name => row[name] = data[date][name] || 0);
+        XLSX.utils.sheet_add_json(ws, [row], { skipHeader: false, origin: -1 });
+      });
+
+      XLSX.utils.book_append_sheet(wb, ws, "Savings Data");
+      XLSX.writeFile(wb, "seven_thursday_data.xlsx");
+    }
+
+    function exportToPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.text("Seven Thursday - Summary Report", 10, 10);
+      let y = 20;
+      Object.keys(data).forEach(date => {
+        doc.text(`${date}: ${JSON.stringify(data[date])}`, 10, y);
+        y += 10;
+        if (y > 270) {
+          doc.addPage();
+          y = 10;
+        }
+      });
+      doc.save("seven_thursday_data.pdf");
+    }
+
+    fetchData();
+  </script>
+</body>
+</html>
